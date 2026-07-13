@@ -1,0 +1,10 @@
+{
+  "subscription_type": 123,
+  "rate_limits_available": "yes",
+  "session": "not-an-object",
+  "rate_limits": {
+    "limits": "should-be-an-array",
+    "five_hour": [1, 2, 3],
+    "extra_usage": [1, 2, 3]
+  }
+}

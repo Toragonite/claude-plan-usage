@@ -1,0 +1,9 @@
+{
+  "subscription_type": "pro",
+  "rate_limits_available": true,
+  "session": { "total_cost_usd": 3.5 },
+  "rate_limits": {
+    "five_hour": { "utilization": 55, "resets_at": "2026-07-13T20:00:00.000Z" },
+    "seven_day": { "utilization": 12, "resets_at": "2026-07-19T00:00:00.000Z" }
+  }
+}

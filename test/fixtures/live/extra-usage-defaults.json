@@ -1,0 +1,12 @@
+{
+  "rate_limits_available": true,
+  "rate_limits": {
+    "extra_usage": {
+      "is_enabled": true,
+      "utilization": "n/a",
+      "used_credits": "free",
+      "monthly_limit": 2500,
+      "decimal_places": 9
+    }
+  }
+}

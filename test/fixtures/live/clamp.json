@@ -1,0 +1,10 @@
+{
+  "rate_limits_available": true,
+  "rate_limits": {
+    "limits": [
+      { "kind": "session", "percent": -5, "resets_at": "not-a-real-date" },
+      { "kind": "weekly_all", "percent": 250, "severity": "", "resets_at": "2026-07-20T00:00:00.000Z" },
+      { "kind": "weekly_scoped", "percent": "abc" }
+    ]
+  }
+}

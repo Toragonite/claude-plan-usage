@@ -1,0 +1,59 @@
+{
+  "name": "claude-plan-usage",
+  "version": "0.1.0",
+  "description": "Live claude.ai plan rate-limit usage and local transcript token/cost aggregation for Claude Code — zero-dependency library + CLI. Unofficial.",
+  "keywords": [
+    "claude",
+    "claude-code",
+    "anthropic",
+    "usage",
+    "quota",
+    "rate-limit",
+    "tokens",
+    "cost",
+    "cli"
+  ],
+  "license": "MIT",
+  "author": "Toragonite",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Toragonite/claude-plan-usage.git"
+  },
+  "homepage": "https://github.com/Toragonite/claude-plan-usage",
+  "bugs": {
+    "url": "https://github.com/Toragonite/claude-plan-usage/issues"
+  },
+  "type": "module",
+  "engines": {
+    "node": ">=18.17"
+  },
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "require": "./dist/index.cjs"
+    }
+  },
+  "bin": {
+    "claude-plan-usage": "./dist/cli.js"
+  },
+  "files": [
+    "dist"
+  ],
+  "sideEffects": false,
+  "scripts": {
+    "build": "tsup",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit",
+    "prepublishOnly": "npm run typecheck && npm run test && npm run build"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "tsup": "^8.0.0",
+    "typescript": "^5.5.0",
+    "vitest": "^3.0.0"
+  }
+}

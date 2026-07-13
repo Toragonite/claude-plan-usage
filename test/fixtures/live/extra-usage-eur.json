@@ -1,0 +1,21 @@
+{
+  "rate_limits_available": true,
+  "rate_limits": {
+    "limits": [
+      {
+        "kind": "session",
+        "percent": 5,
+        "severity": "normal",
+        "resets_at": "2026-07-13T18:00:00.000Z"
+      }
+    ],
+    "extra_usage": {
+      "is_enabled": false,
+      "utilization": 150,
+      "used_credits": 12345,
+      "monthly_limit": 100000,
+      "decimal_places": 3,
+      "currency": "EUR"
+    }
+  }
+}

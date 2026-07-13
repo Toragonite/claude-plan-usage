@@ -1,0 +1,41 @@
+{
+  "subscription_type": "max",
+  "rate_limits_available": true,
+  "session": { "total_cost_usd": 1.2345 },
+  "rate_limits": {
+    "limits": [
+      {
+        "kind": "weekly_all",
+        "percent": 10,
+        "severity": "normal",
+        "resets_at": "2026-07-20T00:00:00.000Z"
+      },
+      {
+        "kind": "weekly_scoped",
+        "percent": 88,
+        "severity": "critical",
+        "resets_at": "2026-07-20T00:00:00.000Z"
+      },
+      {
+        "kind": "session",
+        "percent": 42.5,
+        "severity": "warning",
+        "resets_at": "2026-07-13T18:00:00.000Z"
+      },
+      {
+        "kind": "opus",
+        "percent": 99,
+        "severity": "critical",
+        "resets_at": "2026-07-20T00:00:00.000Z"
+      }
+    ],
+    "extra_usage": {
+      "is_enabled": true,
+      "utilization": 0,
+      "used_credits": 0,
+      "monthly_limit": 5000,
+      "decimal_places": 2,
+      "currency": "USD"
+    }
+  }
+}
