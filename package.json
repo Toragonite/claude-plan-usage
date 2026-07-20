@@ -38,7 +38,7 @@
     }
   },
   "bin": {
-    "claude-plan-usage": "./dist/cli.js"
+    "claude-plan-usage": "dist/cli.js"
   },
   "files": [
     "dist"
