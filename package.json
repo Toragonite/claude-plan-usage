@@ -1,6 +1,6 @@
 {
   "name": "claude-plan-usage",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Live claude.ai plan rate-limit usage and local transcript token/cost aggregation for Claude Code — zero-dependency library + CLI. Unofficial.",
   "keywords": [
     "claude",

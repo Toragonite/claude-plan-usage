@@ -79,11 +79,15 @@ export interface ExtraUsage {
  * A single normalized live-usage reading.
  *
  * IMPORTANT: `available === false` with `error === undefined` is a VALID,
- * successful state. It means the account exposes no claude.ai plan rate limits
- * (for example a setup-token / non-subscription login). It is NOT a failure.
- * The `error` field is set ONLY when the probe itself failed. Callers must treat
- * `error === undefined && available === false` as "no plan limits", never as an
- * error.
+ * successful state. It means the account exposed no claude.ai plan rate limits.
+ * It is NOT a failure, and the `error` field is set ONLY when the probe itself
+ * failed. Callers must treat `error === undefined && available === false` as "no
+ * plan limits", never as an error.
+ *
+ * It is also AMBIGUOUS: a setup-token / API-key login (which has no plan limits
+ * by design) and a subscription login that has expired or been logged out both
+ * produce this exact reading. Do not assume the former — `getAuthStatus` and
+ * `classifyAccount` in `./auth` exist to tell them apart.
  */
 export interface LiveUsage {
   /** True only when the account exposes claude.ai plan rate limits (`rate_limits_available`). */
@@ -156,6 +160,9 @@ const DEFAULT_TIMEOUT_MS = 20_000;
 
 /** Default bounded concurrency for {@link getLiveUsageForAccounts}. */
 const DEFAULT_CONCURRENCY = 3;
+
+/** Cap on the un-newlined stdout buffer; past this the output is not stream-json at all. */
+const MAX_LINE_BUFFER_BYTES = 1024 * 1024;
 
 /** How long a good windows reading is carried forward once upstream stops returning windows. */
 const DEFAULT_STALE_WINDOW_MAX_MS = 30 * 60 * 1000;
@@ -434,8 +441,18 @@ function probe(options: LiveUsageOptions, timeoutMs: number): Promise<LiveUsage>
       done({ ...parseLiveUsage(data), fetchedAt: Date.now(), raw: data });
     };
 
-    child.stdout.on('data', (d) => {
+    // setEncoding keeps a multi-byte UTF-8 sequence from being split across chunk
+    // boundaries into replacement characters, which would corrupt a JSON line.
+    child.stdout.setEncoding('utf8');
+    child.stdout.on('data', (d: string) => {
       buf += d;
+      // A well-behaved stream-json child emits newline-terminated lines. If a
+      // megabyte arrives with no newline at all, the output is not what we expect
+      // and no amount of further buffering will produce a parseable line — drop it
+      // and let the timeout / close path settle with an honest error.
+      if (buf.length > MAX_LINE_BUFFER_BYTES) {
+        buf = '';
+      }
       let nl: number;
       while ((nl = buf.indexOf('\n')) >= 0) {
         const line = buf.slice(0, nl);

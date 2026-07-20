@@ -7,6 +7,7 @@ import {
   type ExtraUsage,
   type LiveUsage,
 } from './live';
+import { getAuthStatus, classifyAccount, type AccountKind, type AuthStatus } from './auth';
 import {
   getTranscriptUsage,
   type CostMode,
@@ -15,7 +16,7 @@ import {
 } from './transcripts';
 
 /** Version string, kept in lockstep with package.json by the release script. */
-export const VERSION = '0.1.0';
+export const VERSION = '0.2.0';
 
 /** Thrown for user-facing usage errors (bad flags, dates, enums) → exit code 1. */
 export class UsageError extends Error {}
@@ -35,6 +36,7 @@ const ONE_DAY_MS = 86_400_000;
 const options = {
   json: { type: 'boolean' },
   'live-only': { type: 'boolean' },
+  auth: { type: 'boolean' },
   'transcripts-only': { type: 'boolean' },
   'group-by': { type: 'string' },
   since: { type: 'string' },
@@ -66,6 +68,7 @@ Usage:
 Options:
   --json                       machine-readable JSON output (no ANSI)
   --live-only                  show only live plan usage
+  --auth                       also report each account's auth method and kind
   --transcripts-only           show only transcript aggregation
   --group-by <g>               day|month|session|model|project|total (default day)
   --since <YYYY-MM-DD>         start date (local); disables the 7-day default
@@ -179,6 +182,16 @@ export function formatOverage(extra: ExtraUsage): string {
   return `overage: ON  ${amounts} (${pct}%)`;
 }
 
+/**
+ * Render the `--auth` status line: the authentication method followed by the
+ * account verdict, e.g. `auth: claude.ai · subscription`. A failed auth probe
+ * reports the failure instead of a method, and its verdict is `unknown`.
+ */
+export function formatAuth(auth: AuthStatus, kind: AccountKind): string {
+  if (auth.error !== undefined) return `auth: probe failed: ${auth.error} · ${kind}`;
+  return `auth: ${auth.authMethod ?? 'unknown'} · ${kind}`;
+}
+
 // ---- Rendering ----
 
 function colorize(s: string, code: string, enabled: boolean): string {
@@ -191,19 +204,37 @@ function severityColor(percent: number, severity: string): string {
   return ANSI.green;
 }
 
-function renderLiveAccount(
-  usage: LiveUsage & { name: string; configDir: string },
-  colorEnabled: boolean,
-  nowMs: number,
-): string[] {
+/** One account's live reading, plus the auth reading when `--auth` was passed. */
+type LiveAccount = LiveUsage & {
+  name: string;
+  configDir: string;
+  auth?: AuthStatus;
+  kind?: AccountKind;
+};
+
+function renderLiveAccount(usage: LiveAccount, colorEnabled: boolean, nowMs: number): string[] {
   const lines: string[] = [];
   lines.push(colorize(usage.configDir, ANSI.bold, colorEnabled));
+  // The auth line is appended to every branch below — it is most useful exactly
+  // where the usage reading is least conclusive.
+  const authLine =
+    usage.auth !== undefined ? `  ${formatAuth(usage.auth, usage.kind ?? 'unknown')}` : undefined;
   if (usage.error !== undefined) {
     lines.push(`  probe failed: ${usage.error}`);
+    if (authLine !== undefined) lines.push(authLine);
     return lines;
   }
   if (!usage.available) {
-    lines.push('  no plan limits (token / non-subscription login)');
+    // Two very different accounts land here — a key/token login that never had
+    // plan limits, and a subscription whose login expired. Only --auth can tell
+    // them apart, so the bare line must not claim to know which one this is —
+    // and the hint is dropped when the auth line below already answers it.
+    lines.push(
+      authLine !== undefined
+        ? '  no plan limits (token account or logged-out login)'
+        : '  no plan limits (token account or logged-out login — run with --auth)',
+    );
+    if (authLine !== undefined) lines.push(authLine);
     return lines;
   }
   for (const w of usage.windows) {
@@ -221,6 +252,7 @@ function renderLiveAccount(
   if (extra !== null) {
     lines.push(`  ${formatOverage(extra)}`);
   }
+  if (authLine !== undefined) lines.push(authLine);
   return lines;
 }
 
@@ -263,6 +295,10 @@ export async function main(argv: string[]): Promise<number> {
 
   if (values['live-only'] && values['transcripts-only']) {
     return usageError('--live-only and --transcripts-only are mutually exclusive');
+  }
+  // --auth annotates the live block, so it cannot do anything without one.
+  if (values.auth && values['transcripts-only']) {
+    return usageError('--auth cannot be combined with --transcripts-only');
   }
 
   const groupBy = values['group-by'] ?? 'day';
@@ -308,7 +344,7 @@ export async function main(argv: string[]): Promise<number> {
       process.env.NO_COLOR === undefined &&
       values['no-color'] !== true;
 
-    let liveResults: Array<LiveUsage & { name: string; configDir: string }> | undefined;
+    let liveResults: LiveAccount[] | undefined;
     let transcriptReport: TranscriptUsageReport | undefined;
 
     if (wantLive) {
@@ -320,6 +356,19 @@ export async function main(argv: string[]): Promise<number> {
         claudePath: values['claude-path'],
         timeoutMs,
       });
+      if (values.auth) {
+        // One auth probe per account, alongside the usage reading it explains.
+        liveResults = await Promise.all(
+          liveResults.map(async (acct): Promise<LiveAccount> => {
+            const auth = await getAuthStatus({
+              configDir: acct.configDir,
+              claudePath: values['claude-path'],
+              timeoutMs,
+            });
+            return { ...acct, auth, kind: classifyAccount(acct, auth) };
+          }),
+        );
+      }
     }
 
     if (wantTranscripts) {

@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   buildTranscriptTable,
+  formatAuth,
   formatBar,
   formatCost,
   formatOverage,
@@ -11,6 +12,7 @@ import {
   UsageError,
 } from '../src/cli';
 import type { TranscriptUsageReport } from '../src/transcripts';
+import type { AuthStatus } from '../src/auth';
 
 describe('formatBar', () => {
   it('renders empty at 0', () => {
@@ -156,6 +158,9 @@ describe('main exit codes', () => {
   it('returns 1 for conflicting scope flags', async () => {
     expect(await main(['--live-only', '--transcripts-only'])).toBe(1);
   });
+  it('returns 1 for --auth without a live block to annotate', async () => {
+    expect(await main(['--auth', '--transcripts-only'])).toBe(1);
+  });
   it('returns 0 for --help', async () => {
     expect(await main(['--help'])).toBe(0);
   });
@@ -195,6 +200,42 @@ describe('main exit codes', () => {
         '/nonexistent/cpu-test',
       ]),
     ).toBe(1);
+  });
+});
+
+describe('formatAuth', () => {
+  const auth = (over: Partial<AuthStatus> = {}): AuthStatus => ({
+    loggedIn: true,
+    authMethod: 'claude.ai',
+    apiProvider: 'firstParty',
+    apiKeySource: null,
+    email: null,
+    subscriptionType: null,
+    raw: null,
+    fetchedAt: 1_000_000,
+    ...over,
+  });
+
+  it('renders the method and verdict for a subscription login', () => {
+    expect(formatAuth(auth(), 'subscription')).toBe('auth: claude.ai · subscription');
+  });
+  it('renders a key-based login as a token account', () => {
+    expect(formatAuth(auth({ authMethod: 'api_key' }), 'token')).toBe('auth: api_key · token');
+  });
+  it('renders a logged-out dir', () => {
+    expect(formatAuth(auth({ loggedIn: false, authMethod: 'none' }), 'logged_out')).toBe(
+      'auth: none · logged_out',
+    );
+  });
+  it('falls back to unknown when no method was reported', () => {
+    expect(formatAuth(auth({ authMethod: null }), 'subscription')).toBe(
+      'auth: unknown · subscription',
+    );
+  });
+  it('reports the failure instead of a method when the probe errored', () => {
+    expect(formatAuth(auth({ error: 'timeout' }), 'unknown')).toBe(
+      'auth: probe failed: timeout · unknown',
+    );
   });
 });
 

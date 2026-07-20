@@ -31,7 +31,9 @@ import { getLiveUsage, defaultWindowLabel } from 'claude-plan-usage';
 const usage = await getLiveUsage();
 
 if (!usage.available) {
-  console.log(usage.error ?? 'No plan rate limits on this account (e.g. API key/token login).');
+  // No plan limits. That is either a key/token account or a dead login — see
+  // "Which account is this?" for how to tell, with classifyAccount.
+  console.log(usage.error ?? 'No plan rate limits reported for this account.');
 } else {
   for (const w of usage.windows) {
     console.log(`${defaultWindowLabel(w.kind)}: ${w.percent}% (${w.severity})`);
@@ -71,11 +73,19 @@ Prints live usage for the default config dir, followed by a last-7-days daily tr
   overage: ON  $0.00/$50.00 USD (0%)
 ```
 
-An account authenticated with a setup token (a token / non-subscription login) exposes no plan limits:
+An account with no plan limits — a key/token login, *or* a subscription whose login expired — looks like this:
 
 ```
 ~/.claude
-  no plan limits (token / non-subscription login)
+  no plan limits (token account or logged-out login — run with --auth)
+```
+
+`--auth` says which of the two it is, by adding an auth line to every account:
+
+```
+~/.claude
+  no plan limits (token account or logged-out login — run with --auth)
+  auth: none · logged_out
 ```
 
 Transcript aggregation (`--transcripts-only --group-by model --since 2026-07-07`):
@@ -97,6 +107,9 @@ claude-plan-usage --json
 # Only the live probe, no transcript scan
 claude-plan-usage --live-only
 
+# Live probe plus the auth method and account-kind verdict for each account
+claude-plan-usage --live-only --auth
+
 # Only transcripts, grouped by project, for a specific month
 claude-plan-usage --transcripts-only --group-by project --since 2026-06-01 --until 2026-06-30
 
@@ -110,6 +123,7 @@ claude-plan-usage --config-dir ~/.claude --config-dir ~/.claude-work --json
 | --- | --- |
 | `--json` | Emit machine-readable JSON instead of formatted text. |
 | `--live-only` | Skip transcript aggregation; only run the live usage probe. |
+| `--auth` | Also probe each account's auth status; adds an `auth: <method> · <kind>` line to the live block, and an `auth` object plus a `kind` field to each account in `--json` output. Cannot be combined with `--transcripts-only`, which runs no live block to annotate. |
 | `--transcripts-only` | Skip the live usage probe; only aggregate transcripts. |
 | `--group-by <day\|month\|session\|model\|project\|total>` | Grouping for the transcript table. |
 | `--since YYYY-MM-DD` | Only include transcript entries on/after this date. |
@@ -134,8 +148,44 @@ A few guarantees worth knowing before you build on this:
 
 - **Experimental upstream shape.** `get_usage` is an experimental, internal control-protocol response per Claude Code's own documentation — its fields are not a stable public contract. Every field is parsed defensively; anything the parser can't confidently make sense of degrades to `available: false` rather than throwing. The full, unprocessed response is always available on `LiveUsage.raw`, so you can inspect or adapt to shape changes yourself.
 - **Never throws for environmental failure.** `getLiveUsage` and `getLiveUsageForAccounts` never reject because of a missing `claude` binary, a timeout, a spawn failure, or a malformed response — all of those surface through the `error` field on the result. Only invalid *options* you pass in (a programmer error) throw a `TypeError`.
-- **`available: false` is not necessarily a failure.** `available: false` with no `error` set means the account genuinely has no plan rate limits to report — for example, it's authenticated via an API key or token rather than a Claude subscription. That's a normal, successful probe result. `error` being set means the probe itself broke.
+- **`available: false` is not necessarily a failure — but it is ambiguous.** `available: false` with no `error` set means the probe succeeded and the account reported no plan rate limits. `error` being set means the probe itself broke. Two *very* different accounts produce that same no-limits reading, and the usage probe cannot tell you which one you have: an API-key/token login that has no plan limits by design, and a subscription login that has **expired or been logged out**. The first is a normal steady state; the second needs a human to log back in. Use [`getAuthStatus`](#getauthstatusoptions-authstatusoptions-promiseauthstatus) and [`classifyAccount`](#classifyaccountusage-auth-accountkind) to separate them — see [Which account is this?](#which-account-is-this).
 - **Stale windows.** Upstream `rate_limits` can intermittently come back empty even for accounts that do have plan limits. `mergeStaleWindows(fresh, prev?, maxAgeMs?)` is a pure, I/O-free helper that lets you carry the last known-good windows forward from a previous `MergedLiveUsage`, marked `windowsStale: true`, for up to `maxAgeMs` (default: 30 minutes).
+
+### Which account is this?
+
+`getAuthStatus` spawns `claude auth status --json` under a config dir and normalizes the result. It reads no credentials itself — the CLI inspects its own config dir and reports a summary. These are the four states you will actually see:
+
+| Config dir | `loggedIn` | `authMethod` | Other fields | Live usage reads |
+| --- | --- | --- | --- | --- |
+| `ANTHROPIC_API_KEY` in the environment | `true` | `api_key` | `apiKeySource: 'ANTHROPIC_API_KEY'` | `available: false` |
+| `apiKeyHelper` in settings | `true` | `api_key_helper` | `apiKeySource: 'apiKeyHelper'` | `available: false` |
+| Healthy subscription login | `true` | `claude.ai` | `email`, `subscriptionType` | `available: true` |
+| Expired login, or never logged in | `false` | `none` | no `email` | `available: false` |
+
+The bottom three rows all read `available: false` from the usage probe alone; only `loggedIn` separates a working key-based account from a dead login. `classifyAccount` folds both readings into one verdict:
+
+```ts
+import { getLiveUsage, getAuthStatus, classifyAccount } from 'claude-plan-usage';
+
+const [usage, auth] = await Promise.all([getLiveUsage(), getAuthStatus()]);
+
+switch (classifyAccount(usage, auth)) {
+  case 'subscription':
+    console.log(`plan ${usage.subscriptionType}, ${usage.windows.length} windows`);
+    break;
+  case 'token':
+    console.log('API key / setup token — no plan limits exist for this account');
+    break;
+  case 'logged_out':
+    console.log('login expired or absent — run `claude` and log in again');
+    break;
+  case 'unknown':
+    console.log('not enough evidence to say — see usage.error / auth.error');
+    break;
+}
+```
+
+`classifyAccount` is deliberately biased toward `'unknown'`: when the auth reading is missing or carries an `error`, it refuses to guess rather than reporting `'token'`. Guessing is the whole bug — a wrong guess of "token account" hides an expired login behind a state that looks normal.
 
 ### Transcript scanning
 
@@ -223,6 +273,51 @@ Extends `LiveUsage` with:
 | --- | --- | --- |
 | `windowsStale?` | `boolean` | `true` when `windows` was carried forward from a previous result by `mergeStaleWindows`. |
 | `windowsFetchedAt?` | `number` | Epoch milliseconds when the (possibly carried-forward) `windows` were originally fetched. |
+
+### Auth status
+
+#### `getAuthStatus(options?: AuthStatusOptions): Promise<AuthStatus>`
+
+Reads the authentication state of one config dir by spawning `claude auth status --json`. Never rejects for environmental failure (missing binary, timeout, garbage output) — those resolve with `error` set and every other field at its empty value. Only an invalid `timeoutMs` throws a `TypeError`, synchronously.
+
+#### `parseAuthStatus(data: unknown): Pick<AuthStatus, 'loggedIn' | 'authMethod' | 'apiProvider' | 'apiKeySource' | 'email' | 'subscriptionType'>`
+
+Pure parsing function: turns a raw `auth status --json` payload into the parsed subset of `AuthStatus` fields, without spawning any process. Total — non-objects and malformed shapes degrade to `loggedIn: false` with `null` everywhere else rather than throwing.
+
+#### `classifyAccount(usage, auth): AccountKind`
+
+Pure helper (no I/O). Folds a `LiveUsage`-shaped reading and an `AuthStatus`-shaped reading into one verdict; both arguments accept `null` / `undefined`. The rules, in order: `usage.available === true` → `'subscription'`; else a trustworthy auth reading (present, no `error`) decides `'token'` when `loggedIn` and `'logged_out'` when not; else `'unknown'`. See [Which account is this?](#which-account-is-this).
+
+#### `AuthStatusOptions`
+
+| Field | Type | Description |
+| --- | --- | --- |
+| `configDir?` | `string` | Config dir to probe. Defaults to `defaultConfigDir()`. |
+| `claudePath?` | `string` | Path to the `claude` binary. Defaults to resolving `claude` from `PATH`. |
+| `timeoutMs?` | `number` | Timeout for the probe. Defaults to `20000`. |
+
+#### `AuthStatus`
+
+| Field | Type | Description |
+| --- | --- | --- |
+| `loggedIn` | `boolean` | Whether the config dir holds a usable login — subscription *or* API key/token. |
+| `authMethod` | `string \| null` | `'claude.ai'`, `'api_key'`, `'api_key_helper'`, `'none'`, or another upstream value. |
+| `apiProvider` | `string \| null` | API provider (`'firstParty'`, …), as reported upstream. |
+| `apiKeySource` | `string \| null` | Where a key-based credential came from (`'ANTHROPIC_API_KEY'`, `'apiKeyHelper'`). |
+| `email` | `string \| null` | Account email for a subscription login; `null` when logged out or key-based. |
+| `subscriptionType` | `string \| null` | The account's subscription tier, as reported upstream. |
+| `raw` | `unknown` | The unprocessed upstream payload, or `null` on error. |
+| `fetchedAt` | `number` | Epoch milliseconds when this result was produced. |
+| `error?` | `string` | Set only when the probe itself failed; treat every other field as unknown. |
+
+#### `AccountKind`
+
+| Value | Meaning |
+| --- | --- |
+| `'subscription'` | A claude.ai plan with rate limits to report. |
+| `'token'` | An API-key / setup-token login; no plan limits exist, by design. |
+| `'logged_out'` | No usable login; plan limits are missing because auth is gone. |
+| `'unknown'` | The evidence needed to decide was missing or errored. |
 
 ### Pricing
 
